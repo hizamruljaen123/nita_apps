@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Simulasi K-Medoids & Dijkstra</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <!-- Leaflet.js for map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-blue-100 min-h-screen">
+<div class="max-w-7xl mx-auto py-8 flex">
+    <!-- Sidebar Vertical Tabs -->
+    <div class="w-56 flex-shrink-0 pr-6">
+        <div class="sticky top-8">
+            <div class="flex flex-col gap-2">
+                <button class="tab-btn text-left px-4 py-3 rounded-lg font-semibold text-blue-800 bg-blue-100 hover:bg-blue-200 focus:bg-blue-300 transition" data-tab="tab1">1. Pengumpulan Data</button>
+                <button class="tab-btn text-left px-4 py-3 rounded-lg font-semibold text-blue-800 bg-blue-100 hover:bg-blue-200 focus:bg-blue-300 transition" data-tab="tab2">2. Proses K-Medoids</button>
+                <button class="tab-btn text-left px-4 py-3 rounded-lg font-semibold text-blue-800 bg-blue-100 hover:bg-blue-200 focus:bg-blue-300 transition" data-tab="tab3">3. Hasil Klaster Akhir</button>
+                <button class="tab-btn text-left px-4 py-3 rounded-lg font-semibold text-blue-800 bg-blue-100 hover:bg-blue-200 focus:bg-blue-300 transition" data-tab="tab4">4. Proses Dijkstra</button>
+                <button class="tab-btn text-left px-4 py-3 rounded-lg font-semibold text-blue-800 bg-blue-100 hover:bg-blue-200 focus:bg-blue-300 transition" data-tab="tab5">5. Visualisasi Jalur (Peta)</button>
+            </div>
+        </div>
+    </div>
+    <!-- Main Content -->
+    <div class="flex-1">
+        <h2 class="text-3xl font-extrabold text-center text-blue-800 mb-8 drop-shadow">Simulasi Detail K-Medoids & Dijkstra</h2>
+        <div id="simulation-log" class="mb-4"></div>
+        <div id="tab1" class="tab-content">
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
+                <h4 class="text-2xl font-bold text-blue-700 mb-2">1. Pengumpulan Data</h4>
+                <div id="data-collection-table"></div>
+                <div id="data-collection-plot" class="my-4" style="height:400px;"></div>
+            </div>
+        </div>
+        <div id="tab2" class="tab-content hidden">
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
+                <h4 class="text-2xl font-bold text-blue-700 mb-2">2. Proses K-Medoids</h4>
+                <div id="kmedoids-steps"></div>
+                <div id="kmedoids-plot" class="my-4" style="height:400px;"></div>
+            </div>
+        </div>
+        <div id="tab3" class="tab-content hidden">
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
+                <h4 class="text-2xl font-bold text-blue-700 mb-2">3. Hasil Klaster Akhir</h4>
+                <div id="final-clusters-table"></div>
+                <div id="final-clusters-plot" class="my-4" style="height:400px;"></div>
+            </div>
+        </div>
+        <div id="tab4" class="tab-content hidden">
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
+                <h4 class="text-2xl font-bold text-blue-700 mb-2">4. Proses Dijkstra</h4>
+                <div id="dijkstra-steps"></div>
+                <div id="dijkstra-graph-plot" class="my-4" style="height:400px;"></div>
+            </div>
+        </div>
+        <div id="tab5" class="tab-content hidden">
+            <div class="bg-white rounded-xl shadow-lg p-6 mb-6 border border-gray-200">
+                <h4 class="text-2xl font-bold text-blue-700 mb-2">5. Visualisasi Jalur Terpendek (Peta)</h4>
+                <div id="dijkstra-map" style="height:500px;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+// Vertical Tabs Logic
+const tabBtns = document.querySelectorAll('.tab-btn');
+const tabContents = document.querySelectorAll('.tab-content');
+function activateTab(tabId) {
+    tabContents.forEach(tc => tc.classList.add('hidden'));
+    document.getElementById(tabId).classList.remove('hidden');
+    tabBtns.forEach(btn => btn.classList.remove('bg-blue-300', 'ring-2', 'ring-blue-400'));
+    const activeBtn = Array.from(tabBtns).find(btn => btn.dataset.tab === tabId);
+    if (activeBtn) activeBtn.classList.add('bg-blue-300', 'ring-2', 'ring-blue-400');
+}
+tabBtns.forEach(btn => {
+    btn.addEventListener('click', () => activateTab(btn.dataset.tab));
+});
+// Set default tab
+activateTab('tab1');
+
+// Simulation logic (unchanged)
+document.addEventListener('DOMContentLoaded', function() {
+    fetch('/simulation_data')
+        .then(res => res.json())
+        .then(data => renderSimulation(data));
+
+    function renderSimulation(data) {
+        if (!data || data.status !== 'success') {
+            document.getElementById('simulation-log').innerHTML = '<div class="bg-red-100 text-red-700 p-3 rounded mb-4">Gagal memuat data simulasi.</div>';
+            return;
+        }
+        renderDataCollection(data.data_collection);
+        renderKMedoidsSteps(data.kmedoids_steps);
+        renderFinalClusters(data.final_clusters);
+        renderDijkstraSteps(data.dijkstra_steps);
+        renderDijkstraMap(data.dijkstra_steps);
+    }
+
+    function safeVal(val, fallback = 'N/A') {
+        // Tangani nilai Infinity, -Infinity, string 'Infinity', '∞', dll
+        if (
+            val === undefined ||
+            val === null ||
+            val === '' ||
+            (typeof val === 'number' && (isNaN(val) || !isFinite(val))) ||
+            val === Infinity ||
+            val === -Infinity ||
+            val === 'Infinity' ||
+            val === '-Infinity' ||
+            val === '∞'
+        ) return fallback;
+        return val;
+    }
+
+    function renderDataCollection(collection) {
+        if (!collection || !collection.raw_data || collection.raw_data.length === 0) {
+            document.getElementById('data-collection-table').innerHTML = '<div class="bg-yellow-100 text-yellow-700 p-2 rounded">Data tidak tersedia.</div>';
+            return;
+        }
+        let html = `<div class='mb-2 text-sm text-gray-700'>${safeVal(collection.description)}</div><div class='overflow-x-auto'>`;
+        html += renderTable(collection.raw_data.slice(0, 10), '10 Data Pertama');
+        html += '</div>';
+        document.getElementById('data-collection-table').innerHTML = html + '<div class="text-xs text-gray-500 mt-1">Menampilkan 10 data pertama.</div>';
+        // Grafik utama: Fatalities vs Accidents
+        let trace = {
+            x: collection.raw_data.map(r => safeVal(r.fatalities, 0)),
+            y: collection.raw_data.map(r => safeVal(r.accidents, 0)),
+            mode: 'markers',
+            type: 'scatter',
+            text: collection.raw_data.map(r => safeVal(r.district)),
+            marker: { size: 10, color: '#2563eb' }
+        };
+        let beforeDiv = document.createElement('div');
+        beforeDiv.id = 'data-collection-plot';
+        beforeDiv.style.height = '400px';
+        document.getElementById('data-collection-table').appendChild(beforeDiv);
+        Plotly.newPlot('data-collection-plot', [trace], {xaxis:{title:'Fatalities'},yaxis:{title:'Accidents'},title:'Sebelum t-SNE: Fatalities vs Accidents'});
+        // Grafik tambahan: distribusi fitur (jika ada)
+        if (collection.features && collection.features_normalized) {
+            // Grafik distribusi fitur asli
+            let features = collection.features;
+            let fkeys = Object.keys(features[0] || {});
+            let featureTraces = fkeys.map(fk => ({
+                x: features.map(r => safeVal(r[fk], 0)),
+                type: 'histogram',
+                name: fk,
+                opacity: 0.6
+            }));
+            let layout1 = {barmode: 'overlay', title: 'Distribusi Fitur Asli', xaxis: {title: 'Value'}, yaxis: {title: 'Count'}};
+            let div1 = document.createElement('div');
+            div1.id = 'feature-histogram';
+            div1.style.height = '320px';
+            document.getElementById('data-collection-table').appendChild(div1);
+            Plotly.newPlot('feature-histogram', featureTraces, layout1);
+            // Grafik distribusi fitur normalisasi
+            let featuresNorm = collection.features_normalized;
+            let featureNormTraces = fkeys.map(fk => ({
+                x: featuresNorm.map(r => safeVal(r[fk], 0)),
+                type: 'histogram',
+                name: fk,
+                opacity: 0.6
+            }));
+            let layout2 = {barmode: 'overlay', title: 'Distribusi Fitur Normalisasi', xaxis: {title: 'Value'}, yaxis: {title: 'Count'}};
+            let div2 = document.createElement('div');
+            div2.id = 'feature-histogram-norm';
+            div2.style.height = '320px';
+            document.getElementById('data-collection-table').appendChild(div2);
+            Plotly.newPlot('feature-histogram-norm', featureNormTraces, layout2);
+        }
+        // Grafik t-SNE jika ada
+        if (collection.tsne && collection.tsne.length > 0) {
+            let tsneTrace = {
+                x: collection.tsne.map(r => safeVal(r.x, 0)),
+                y: collection.tsne.map(r => safeVal(r.y, 0)),
+                mode: 'markers',
+                type: 'scatter',
+                text: collection.tsne.map(r => `${safeVal(r.district)}<br>Fatalities: ${safeVal(r.fatalities)}<br>Accidents: ${safeVal(r.accidents)}<br>Cluster: ${safeVal(r.cluster)}`),
+                marker: {
+                    size: 12,
+                    color: collection.tsne.map(r => safeVal(r.cluster, 0)),
+                    colorscale: 'Viridis',
+                    showscale: true,
+                    colorbar: {title: 'Cluster'}
+                }
+            };
+            let tsneDiv = document.createElement('div');
+            tsneDiv.id = 'tsne-plot';
+            tsneDiv.style.height = '400px';
+            document.getElementById('data-collection-table').appendChild(tsneDiv);
+            Plotly.newPlot('tsne-plot', [tsneTrace], {title: 'Setelah t-SNE: Visualisasi t-SNE (Clustering)', xaxis: {title: 't-SNE 1'}, yaxis: {title: 't-SNE 2'}});
+        }
+    }
+
+    function renderKMedoidsSteps(steps) {
+        if (!steps || steps.length === 0) {
+            document.getElementById('kmedoids-steps').innerHTML = '<div class="bg-yellow-100 text-yellow-700 p-2 rounded">Tahapan K-Medoids tidak tersedia.</div>';
+            return;
+        }
+        let html = '';
+        steps.forEach((step, idx) => {
+            html += `<div class="mb-4 border-b border-blue-100 pb-2"><div class="font-semibold text-blue-700">${safeVal(step.step_name)}</div><div class="text-gray-700 mb-2">${safeVal(step.description)}</div>`;
+            if (step.medoids) {
+                html += renderTable(step.medoids, 'Medoids');
+            }
+            if (step.cluster_assignments) {
+                html += renderTable(step.cluster_assignments.slice(0, 10), 'Cluster Assignments (10 data)');
+            }
+            if (step.total_cost !== undefined) {
+                html += `<div class="text-xs text-blue-700 font-bold">Total Cost: ${safeVal(step.total_cost, 0)}</div>`;
+            }
+            if (step.old_medoids) {
+                html += '<div class="text-xs font-semibold">Old Medoids:</div>' + renderTable(step.old_medoids);
+            }
+            if (step.new_medoids) {
+                html += '<div class="text-xs font-semibold">New Medoids:</div>' + renderTable(step.new_medoids);
+            }
+            if (step.old_cost !== undefined && step.new_cost !== undefined) {
+                html += `<div class="text-xs">Old Cost: ${safeVal(step.old_cost, 0)} | New Cost: ${safeVal(step.new_cost, 0)}</div>`;
+            }
+            html += '</div>';
+        });
+        document.getElementById('kmedoids-steps').innerHTML = html;
+        let lastAssign = [...steps].reverse().find(s => s.cluster_assignments);
+        if (lastAssign) {
+            let clusters = [...new Set(lastAssign.cluster_assignments.map(r => safeVal(r.cluster, 0)))];
+            let traces = clusters.map(c => {
+                let pts = lastAssign.cluster_assignments.filter(r => safeVal(r.cluster, 0) === c);
+                return {
+                    x: pts.map(r => safeVal(r.fatalities, 0)),
+                    y: pts.map(r => safeVal(r.accidents, 0)),
+                    mode: 'markers',
+                    type: 'scatter',
+                    name: 'Cluster ' + c,
+                    text: pts.map(r => safeVal(r.district)),
+                    marker: { size: 10 }
+                };
+            });
+            Plotly.newPlot('kmedoids-plot', traces, {xaxis:{title:'Fatalities'},yaxis:{title:'Accidents'},title:'Cluster Assignment'});
+        }
+    }
+
+    function renderFinalClusters(final_clusters) {
+        if (!final_clusters || Object.keys(final_clusters).length === 0) {
+            document.getElementById('final-clusters-table').innerHTML = '<div class="bg-yellow-100 text-yellow-700 p-2 rounded">Hasil klaster tidak tersedia.</div>';
+            return;
+        }
+        let html = '';
+        Object.entries(final_clusters).forEach(([cid, cdata]) => {
+            html += `<div class="mb-4 border-b border-blue-100 pb-2"><div class="font-semibold text-blue-700">${safeVal(cid)}</div>`;
+            html += `<div class="text-xs">Medoid: <span class="font-semibold text-blue-600">${safeVal(cdata.medoid?.district)}</span></div>`;
+            html += `<div class="text-xs">Dominant Risk Level: <span class="font-semibold">${safeVal(cdata.dominant_risk_level)}</span></div>`;
+            html += `<div class="text-xs">Avg Risk Score: <span class="font-semibold">${safeVal(cdata.avg_risk_score, 0)}</span></div>`;
+            html += `<div class="text-xs">Jumlah Titik: <span class="font-semibold">${safeVal(cdata.count, 0)}</span></div>`;
+            html += renderTable((cdata.points||[]).slice(0, 10), '10 Data Pertama');
+            html += '</div>';
+        });
+        document.getElementById('final-clusters-table').innerHTML = html;
+        let traces = [];
+        Object.values(final_clusters).forEach((c, idx) => {
+            traces.push({
+                x: (c.points||[]).map(r => safeVal(r.fatalities, 0)),
+                y: (c.points||[]).map(r => safeVal(r.accidents, 0)),
+                mode: 'markers',
+                type: 'scatter',
+                name: 'Cluster ' + idx,
+                text: (c.points||[]).map(r => safeVal(r.district)),
+                marker: { size: 10 }
+            });
+        });
+        Plotly.newPlot('final-clusters-plot', traces, {xaxis:{title:'Fatalities'},yaxis:{title:'Accidents'},title:'Final Clusters'});
+    }
+
+    function renderDijkstraSteps(steps) {
+        if (!steps || steps.length === 0) {
+            document.getElementById('dijkstra-steps').innerHTML = '<div class="bg-yellow-100 text-yellow-700 p-2 rounded">Tahapan Dijkstra tidak tersedia.</div>';
+            return;
+        }
+        let html = '';
+        steps.forEach((step, idx) => {
+            html += `<div class="mb-4 border-b border-blue-100 pb-2"><div class="font-semibold text-blue-700">${safeVal(step.step_name)}</div><div class="text-gray-700 mb-2">${safeVal(step.description)}</div>`;
+            if (step.distances) {
+                html += '<div class="text-xs">Distances: ' + JSON.stringify(step.distances) + '</div>';
+            }
+            if (step.visited) {
+                html += '<div class="text-xs">Visited: ' + step.visited.join(', ') + '</div>';
+            }
+            if (step.unvisited) {
+                html += '<div class="text-xs">Unvisited: ' + step.unvisited.join(', ') + '</div>';
+            }
+            if (step.neighbor_updates) {
+                html += renderTable(step.neighbor_updates, 'Neighbor Updates');
+            }
+            if (step.graph) {
+                html += '<div class="text-xs font-semibold">Graph Structure:</div>' + renderTable(step.graph.nodes, 'Nodes') + renderTable(step.graph.edges, 'Edges');
+            }
+            if (step.path_segments) {
+                html += renderTable(step.path_segments, 'Path Segments');
+            }
+            if (step.path) {
+                html += '<div class="text-xs">Path: ' + step.path.join(' → ') + '</div>';
+            }
+            if (step.total_distance !== undefined) {
+                html += `<div class="text-xs font-bold text-blue-700">Total Distance: ${safeVal(step.total_distance, 0)} km</div>`;
+            }
+            if (step.total_weighted_distance !== undefined) {
+                html += `<div class="text-xs font-bold text-blue-700">Total Weighted Distance: ${safeVal(step.total_weighted_distance, 0)} km</div>`;
+            }
+            html += '</div>';
+        });
+        document.getElementById('dijkstra-steps').innerHTML = html;
+        let graphStep = steps.find(s => s.graph);
+        if (graphStep) {
+            let nodes = graphStep.graph.nodes;
+            let edges = graphStep.graph.edges;
+            let edgeTraces = edges.map(e => {
+                let from = nodes.find(n => n.id === safeVal(e.source));
+                let to = nodes.find(n => n.id === safeVal(e.target));
+                return {
+                    x: [safeVal(from?.lng, 0), safeVal(to?.lng, 0)],
+                    y: [safeVal(from?.lat, 0), safeVal(to?.lat, 0)],
+                    mode: 'lines',
+                    line: {width: 2, color: '#888'},
+                    showlegend: false
+                };
+            });
+            let nodeTrace = {
+                x: nodes.map(n => safeVal(n.lng, 0)),
+                y: nodes.map(n => safeVal(n.lat, 0)),
+                mode: 'markers+text',
+                type: 'scatter',
+                text: nodes.map(n => safeVal(n.id)),
+                textposition: 'top center',
+                marker: {size: 12, color: '#2563eb'},
+                name: 'Districts'
+            };
+            Plotly.newPlot('dijkstra-graph-plot', [...edgeTraces, nodeTrace], {xaxis:{title:'Longitude'},yaxis:{title:'Latitude'},title:'Graph Structure'});
+        }
+    }
+
+    function renderDijkstraMap(steps) {
+        if (!steps || steps.length === 0) return;
+        let lastStep = [...steps].reverse().find(s => s.path_segments);
+        if (!lastStep) return;
+        let map = L.map('dijkstra-map').setView([lastStep.path_segments[0].from_coords.lat, lastStep.path_segments[0].from_coords.lng], 10);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            maxZoom: 18,
+        }).addTo(map);
+        let latlngs = [];
+        lastStep.path_segments.forEach(seg => {
+            latlngs.push([seg.from_coords.lat, seg.from_coords.lng]);
+        });
+        let last = lastStep.path_segments[lastStep.path_segments.length-1];
+        latlngs.push([last.to_coords.lat, last.to_coords.lng]);
+        let polyline = L.polyline(latlngs, {color: '#ef4444', weight: 6}).addTo(map);
+        map.fitBounds(polyline.getBounds());
+        lastStep.path_segments.forEach(seg => {
+            L.marker([seg.from_coords.lat, seg.from_coords.lng], {icon: L.icon({iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png', iconSize: [28, 28]})}).addTo(map).bindPopup(seg.from);
+        });
+        L.marker([last.to_coords.lat, last.to_coords.lng], {icon: L.icon({iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png', iconSize: [28, 28]})}).addTo(map).bindPopup(last.to);
+    }
+
+    function renderTable(data, title) {
+        if (!data || data.length === 0) return '';
+        let keys = Object.keys(data[0]);
+        let html = title ? `<div class='font-semibold text-blue-700 mb-1'>${title}</div>` : '';
+        html += `<div class="overflow-x-auto">
+        <table class="w-full border border-blue-200 rounded-lg overflow-x-auto text-xs table-auto shadow-sm">
+        <thead>
+            <tr>
+                ${keys.map(k => `<th class='bg-blue-100 text-blue-800 px-3 py-2 border-b border-blue-200 font-semibold text-xs uppercase tracking-wider text-center'>${k}</th>`).join('')}
+            </tr>
+        </thead>
+        <tbody>
+        `;
+        data.forEach((row, idx) => {
+            html += `<tr class="${idx % 2 === 0 ? 'bg-white' : 'bg-blue-50'} hover:bg-blue-200 transition">` +
+                keys.map(k => `<td class='px-3 py-2 border-b border-blue-100 text-center whitespace-nowrap'>${safeVal(row[k], (typeof row[k] === 'number' ? 0 : 'N/A'))}</td>`).join('') + '</tr>';
+        });
+        html += '</tbody></table></div>';
+        return html;
+    }
+});
+</script>
+</body>
+</html>

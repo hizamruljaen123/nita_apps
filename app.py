@@ -7,6 +7,7 @@ import networkx as nx
 import requests # Make sure to install requests: pip install requests
 from sklearn_extra.cluster import KMedoids
 from math import radians, sin, cos, sqrt, atan2 # Added for Haversine
+from sklearn.manifold import TSNE
 
 app = Flask(__name__)
 
@@ -180,6 +181,11 @@ def get_osrm_route(points_coords):
 @app.route('/')
 def index():
     return render_template('index.html')
+
+@app.route('/simulation')
+def simulation():
+    """Route for the detailed simulation page showing K-medoids and Dijkstra algorithms"""
+    return render_template('simulation.html')
 
 @app.route('/initial_data')
 def initial_data_route(): # Renamed to avoid conflict with function name
@@ -397,6 +403,540 @@ def find_route_api():
         return jsonify({
             'status': 'error', 
             'message': f'Gagal menemukan rute: {str(e)}',
+            'trace': traceback.format_exc()
+        }), 500
+
+@app.route('/simulation_data')
+def simulation_data():
+    """API endpoint to provide detailed simulation data for K-medoids and Dijkstra algorithms"""
+
+    try:
+        # Generate dummy data
+        raw_data = generate_dummy_data()
+        # Replace NaN/None/blank, non-numeric, inf/-inf with 0 for all numeric columns
+        for col in raw_data.columns:
+            if np.issubdtype(raw_data[col].dtype, np.number):
+                raw_data[col] = pd.to_numeric(raw_data[col], errors='coerce').replace([np.inf, -np.inf], 0).fillna(0)
+            else:
+                raw_data[col] = raw_data[col].replace([None, '', np.nan, np.inf, -np.inf, 'Infinity', '-Infinity'], 0)
+        # Store all intermediate steps for detailed visualization
+        simulation_results = {
+            "status": "success",
+            "data_collection": {
+                "raw_data": raw_data.replace([None, '', np.nan, np.inf, -np.inf, 'Infinity', '-Infinity'], 0).to_dict('records'),
+                "description": "Data kecelakaan yang dikumpulkan dari berbagai wilayah di Aceh Utara dan Lhokseumawe"
+            },
+            "kmedoids_steps": [],
+            "final_clusters": {},
+            "dijkstra_steps": []
+        }
+        
+        # Step 1: Data Collection and Preparation
+        features = raw_data[['fatalities', 'road_condition', 'accidents', 'traffic']]
+        features = features.apply(pd.to_numeric, errors='coerce').replace([np.inf, -np.inf], 0).fillna(0)
+        features_normalized = (features - features.mean()) / features.std()
+        features_normalized = features_normalized.replace([np.inf, -np.inf], 0).fillna(0)
+        simulation_results["data_collection"]["features"] = features.to_dict('records')
+        simulation_results["data_collection"]["features_normalized"] = features_normalized.to_dict('records')
+
+        # --- t-SNE Visualization ---
+        try:
+            tsne = TSNE(n_components=2, random_state=42, perplexity=5, n_iter=500)
+            tsne_result = tsne.fit_transform(features_normalized)
+            tsne_data = []
+            for i, row in enumerate(raw_data.itertuples()):
+                tsne_data.append({
+                    'x': float(tsne_result[i,0]),
+                    'y': float(tsne_result[i,1]),
+                    'district': getattr(row, 'district', ''),
+                    'fatalities': getattr(row, 'fatalities', 0),
+                    'accidents': getattr(row, 'accidents', 0),
+                    'cluster': int(getattr(row, 'cluster', 0)) if hasattr(row, 'cluster') else 0
+                })
+            simulation_results["data_collection"]["tsne"] = tsne_data
+        except Exception as e:
+            simulation_results["data_collection"]["tsne"] = []
+        # Step 2: K-medoids Clustering Process
+        n_clusters = 3
+        
+        # Store initial random medoid selection
+        np.random.seed(42)  # For reproducibility
+        initial_medoid_indices = np.random.choice(len(raw_data), n_clusters, replace=False)
+        initial_medoids = raw_data.iloc[initial_medoid_indices].copy()
+        
+        # Add initial medoids selection step
+        simulation_results["kmedoids_steps"].append({
+            "step_name": "Inisialisasi Medoid",
+            "description": "Memilih titik medoid awal secara acak",
+            "medoid_indices": initial_medoid_indices.tolist(),
+            "medoids": initial_medoids.to_dict('records')
+        })
+        
+        # Simulate the full K-medoids algorithm steps
+        # For simplicity, we'll do 3 iterations (typically the algorithm would run until convergence)
+        current_medoids = initial_medoid_indices.copy()
+        
+        for iteration in range(3):
+            # Create distance matrix between each point and each medoid
+            distances = np.zeros((len(raw_data), len(current_medoids)))
+            for i, medoid_idx in enumerate(current_medoids):
+                medoid = raw_data.iloc[medoid_idx][['fatalities', 'road_condition', 'accidents', 'traffic']].values
+                for j, row in enumerate(features.values):
+                    # Using Euclidean distance for simplicity
+                    distances[j, i] = np.sqrt(np.sum((row - medoid) ** 2))
+            
+            # Assign each point to closest medoid
+            clusters = np.argmin(distances, axis=1)
+            cluster_assignment = pd.DataFrame({
+                'point_index': range(len(raw_data)),
+                'cluster': clusters,
+                'district': raw_data['district'],
+                'lat': raw_data['lat'],
+                'lng': raw_data['lng'],
+                'fatalities': raw_data['fatalities'],
+                'road_condition': raw_data['road_condition'],
+                'accidents': raw_data['accidents'],
+                'traffic': raw_data['traffic']
+            })
+            
+            # Calculate cluster cost
+            total_cost = 0
+            for cluster_id in range(n_clusters):
+                cluster_points = cluster_assignment[cluster_assignment['cluster'] == cluster_id]
+                if not cluster_points.empty:
+                    medoid_idx = current_medoids[cluster_id]
+                    medoid = raw_data.iloc[medoid_idx][['fatalities', 'road_condition', 'accidents', 'traffic']].values
+                    
+                    for _, point in cluster_points.iterrows():
+                        point_values = point[['fatalities', 'road_condition', 'accidents', 'traffic']].values
+                        distance = np.sqrt(np.sum((point_values - medoid) ** 2))
+                        total_cost += distance
+            
+            # Record this assignment step
+            simulation_results["kmedoids_steps"].append({
+                "step_name": f"Iterasi {iteration+1} - Penugasan Kluster",
+                "description": "Menetapkan setiap titik ke medoid terdekat",
+                "cluster_assignments": cluster_assignment.to_dict('records'),
+                "total_cost": float(total_cost)
+            })
+            
+            # Try to replace medoids with non-medoids to see if cost improves
+            best_cost = total_cost
+            best_new_medoids = current_medoids.copy()
+            
+            # For educational purposes, we'll just test a few random swaps instead of all possibilities
+            # In a real implementation, you would test all possible swaps
+            for cluster_id in range(n_clusters):
+                cluster_points = cluster_assignment[cluster_assignment['cluster'] == cluster_id]
+                if len(cluster_points) > 0:
+                    # Test 2 random points from each cluster as potential new medoids
+                    candidate_indices = cluster_points['point_index'].sample(min(2, len(cluster_points))).values
+                    
+                    for candidate_idx in candidate_indices:
+                        new_medoids = current_medoids.copy()
+                        new_medoids[cluster_id] = candidate_idx
+                        
+                        # Calculate new cost with candidate medoid
+                        new_distances = np.zeros((len(raw_data), len(new_medoids)))
+                        for i, medoid_idx in enumerate(new_medoids):
+                            medoid = raw_data.iloc[medoid_idx][['fatalities', 'road_condition', 'accidents', 'traffic']].values
+                            for j, row in enumerate(features.values):
+                                new_distances[j, i] = np.sqrt(np.sum((row - medoid) ** 2))
+                        
+                        new_clusters = np.argmin(new_distances, axis=1)
+                        new_cost = 0
+                        
+                        for new_cluster_id in range(n_clusters):
+                            cluster_points = np.where(new_clusters == new_cluster_id)[0]
+                            if len(cluster_points) > 0:
+                                medoid_idx = new_medoids[new_cluster_id]
+                                medoid = raw_data.iloc[medoid_idx][['fatalities', 'road_condition', 'accidents', 'traffic']].values
+                                
+                                for point_idx in cluster_points:
+                                    point = features.values[point_idx]
+                                    distance = np.sqrt(np.sum((point - medoid) ** 2))
+                                    new_cost += distance
+                        
+                        # If this swap improves the cost, keep track of it
+                        if new_cost < best_cost:
+                            best_cost = new_cost
+                            best_new_medoids = new_medoids.copy()
+            
+            # Record the swap evaluation step
+            old_medoids_data = raw_data.iloc[current_medoids].to_dict('records')
+            new_medoids_data = raw_data.iloc[best_new_medoids].to_dict('records')
+            
+            simulation_results["kmedoids_steps"].append({
+                "step_name": f"Iterasi {iteration+1} - Evaluasi Pertukaran Medoid",
+                "description": "Mengevaluasi pertukaran medoid untuk meminimalkan biaya total",
+                "old_medoids": old_medoids_data,
+                "new_medoids": new_medoids_data,
+                "old_cost": float(total_cost),
+                "new_cost": float(best_cost)
+            })
+            
+            # Update medoids if better ones found
+            if not np.array_equal(current_medoids, best_new_medoids):
+                current_medoids = best_new_medoids.copy()
+                
+                simulation_results["kmedoids_steps"].append({
+                    "step_name": f"Iterasi {iteration+1} - Pembaruan Medoid",
+                    "description": "Memperbarui medoid berdasarkan evaluasi pertukaran",
+                    "new_medoids": raw_data.iloc[current_medoids].to_dict('records')
+                })
+            else:
+                simulation_results["kmedoids_steps"].append({
+                    "step_name": f"Iterasi {iteration+1} - Konvergensi",
+                    "description": "Tidak ada perubahan medoid yang dapat meningkatkan hasil"
+                })
+        
+        # Generate final clustering results
+        final_clusters = {}
+        final_medoids = raw_data.iloc[current_medoids].copy()
+        final_medoids['is_medoid'] = True
+        
+        # Assign points to final clusters
+        final_distances = np.zeros((len(raw_data), len(current_medoids)))
+        for i, medoid_idx in enumerate(current_medoids):
+            medoid = raw_data.iloc[medoid_idx][['fatalities', 'road_condition', 'accidents', 'traffic']].values
+            for j, row in enumerate(features.values):
+                final_distances[j, i] = np.sqrt(np.sum((row - medoid) ** 2))
+        
+        final_clusters_assignment = np.argmin(final_distances, axis=1)
+        raw_data['cluster'] = final_clusters_assignment
+        
+        # Calculate average risk score per cluster
+        raw_data['risk_score'] = raw_data['fatalities'] * 0.6 + raw_data['accidents'] * 0.4
+        
+        # Determine risk levels for each point based on risk scores
+        risk_scores = raw_data['risk_score'].values
+        if len(np.unique(risk_scores)) >= 3:
+            # Using quantile-based classification if enough unique values
+            thresholds = np.percentile(risk_scores, [33.33, 66.67])
+            risk_levels = np.array(['Low', 'Medium', 'High'])
+            raw_data['risk_level'] = risk_levels[np.digitize(risk_scores, thresholds)]
+        else:
+            # Simple thresholding for small datasets
+            median_val = np.median(risk_scores)
+            raw_data['risk_level'] = np.where(risk_scores > median_val, 'High', 'Low')
+        
+        # Group the final results by cluster
+        for cluster_id in range(n_clusters):
+            cluster_points = raw_data[raw_data['cluster'] == cluster_id]
+            medoid = final_medoids[final_medoids.index == current_medoids[cluster_id]]
+            
+            final_clusters[f"cluster_{cluster_id}"] = {
+                "points": cluster_points.to_dict('records'),
+                "medoid": medoid.to_dict('records')[0],
+                "avg_risk_score": float(cluster_points['risk_score'].mean()),
+                "dominant_risk_level": cluster_points['risk_level'].value_counts().index[0],
+                "count": len(cluster_points)
+            }
+        
+        simulation_results["final_clusters"] = final_clusters
+        
+        # Step 3: Simulate Dijkstra's algorithm on a sample route
+        # For this example, we'll create a simplified graph representing connections between districts
+        # with distances and simulate finding the shortest path
+        
+        # Create a graph where nodes are districts and edges represent connections
+        G = nx.Graph()
+        
+        # Add nodes (districts)
+        districts_data = {}
+        for district in raw_data['district'].unique():
+            district_data = raw_data[raw_data['district'] == district].iloc[0]
+            G.add_node(district, lat=district_data['lat'], lng=district_data['lng'])
+            districts_data[district] = {
+                "lat": district_data['lat'],
+                "lng": district_data['lng']
+            }
+        
+        # Add edges (connections between districts)
+        districts = list(districts_data.keys())
+        
+        # Create meaningful connections based on proximity
+        for i, district1 in enumerate(districts):
+            for j, district2 in enumerate(districts):
+                if i < j:  # Avoid duplicate edges
+                    dist1 = districts_data[district1]
+                    dist2 = districts_data[district2]
+                    
+                    # Calculate distance between districts
+                    distance = haversine(dist1['lat'], dist1['lng'], dist2['lat'], dist2['lng'])
+                    
+                    # Only connect districts that are within a reasonable distance (e.g., 30 km)
+                    if distance < 30:
+                        # Find any accident points near this route for safety assessment
+                        points_near_route = []
+                        for _, point in raw_data.iterrows():
+                            # Check if a point is close to the route
+                            pt_dist1 = haversine(point['lat'], point['lng'], dist1['lat'], dist1['lng'])
+                            pt_dist2 = haversine(point['lat'], point['lng'], dist2['lat'], dist2['lng'])
+                            
+                            # If point is close to either end of the route or along the route
+                            if pt_dist1 < 5 or pt_dist2 < 5:
+                                points_near_route.append({
+                                    "district": point['district'],
+                                    "risk_level": point.get('risk_level', 'Unknown'),
+                                    "accidents": int(point['accidents']),
+                                    "fatalities": int(point['fatalities']),
+                                    "lat": point['lat'],
+                                    "lng": point['lng']
+                                })
+                        
+                        # Adjust weight based on safety concerns
+                        safety_factor = 1.0
+                        for point in points_near_route:
+                            if point['risk_level'] == 'High':
+                                safety_factor += 0.5  # High risk adds 50% to the path weight
+                            elif point['risk_level'] == 'Medium':
+                                safety_factor += 0.2  # Medium risk adds 20% to the path weight
+                        
+                        # Final weighted distance considering safety
+                        weighted_distance = distance * safety_factor
+                        
+                        # Add the edge with original and weighted distances
+                        G.add_edge(district1, district2, 
+                                  distance=distance, 
+                                  weighted_distance=weighted_distance,
+                                  safety_factor=safety_factor,
+                                  points_near_route=points_near_route)
+        
+        # Select start and end points for our Dijkstra simulation
+        all_districts = list(districts_data.keys())
+        start_district = all_districts[0]  # First district
+        end_district = all_districts[-1]   # Last district
+        
+        # Record the graph structure
+        graph_data = {
+            "nodes": [],
+            "edges": []
+        }
+        
+        for node in G.nodes():
+            graph_data["nodes"].append({
+                "id": node,
+                "lat": G.nodes[node]['lat'],
+                "lng": G.nodes[node]['lng']
+            })
+        
+        for u, v, data in G.edges(data=True):
+            graph_data["edges"].append({
+                "source": u,
+                "target": v,
+                "distance": data['distance'],
+                "weighted_distance": data['weighted_distance'],
+                "safety_factor": data['safety_factor']
+            })
+        
+        simulation_results["dijkstra_steps"].append({
+            "step_name": "Inisialisasi Graf",
+            "description": "Membuat graf berdasarkan wilayah dan koneksi antar wilayah",
+            "graph": graph_data
+        })
+        
+        # Run Dijkstra's algorithm and record the steps
+        # Initialize distance dictionary
+        distances = {node: float('infinity') for node in G.nodes()}
+        distances[start_district] = 0
+        
+        # Initialize previous node dictionary for path reconstruction
+        previous = {node: None for node in G.nodes()}
+        
+        # Initialize priority queue
+        unvisited = list(G.nodes())
+        
+        # Record initialization step
+        simulation_results["dijkstra_steps"].append({
+            "step_name": "Inisialisasi Dijkstra",
+            "description": "Menetapkan jarak awal dan node sebelumnya",
+            "distances": distances.copy(),
+            "start_node": start_district,
+            "target_node": end_district
+        })
+        
+        # Run Dijkstra's algorithm
+        iteration = 0
+        visited = []
+        
+        while unvisited and any(distances[node] < float('infinity') for node in unvisited):
+            iteration += 1
+            
+            # Find the unvisited node with the smallest distance
+            current = min(unvisited, key=lambda node: distances[node])
+            
+            # Stop if we've reached the target
+            if current == end_district:
+                break
+                
+            # Visit the current node
+            unvisited.remove(current)
+            visited.append(current)
+            
+            # Record the current state before processing neighbors
+            current_state = {
+                "step_name": f"Iterasi {iteration} - Pemilihan Node",
+                "description": f"Mengunjungi node {current} dengan jarak {distances[current]:.2f} km",
+                "current_node": current,
+                "distances": distances.copy(),
+                "visited": visited.copy(),
+                "unvisited": unvisited.copy()
+            }
+            
+            simulation_results["dijkstra_steps"].append(current_state)
+            
+            # Process neighbors
+            neighbor_updates = []
+            
+            for neighbor in G.neighbors(current):
+                if neighbor in unvisited:
+                    # Get the edge data
+                    edge_data = G.get_edge_data(current, neighbor)
+                    
+                    # Use weighted distance for safety-aware routing
+                    edge_distance = edge_data['weighted_distance']
+                    
+                    # Calculate new distance to this neighbor
+                    new_distance = distances[current] + edge_distance
+                    
+                    # If we found a better path
+                    if new_distance < distances[neighbor]:
+                        # Record this neighbor update
+                        neighbor_updates.append({
+                            "neighbor": neighbor,
+                            "old_distance": distances[neighbor],
+                            "new_distance": new_distance,
+                            "via_node": current,
+                            "edge_distance": edge_distance
+                        })
+                        
+                        # Update the distance and previous node
+                        distances[neighbor] = new_distance
+                        previous[neighbor] = current
+            
+            # Record the neighbor updates
+            if neighbor_updates:
+                simulation_results["dijkstra_steps"].append({
+                    "step_name": f"Iterasi {iteration} - Pembaruan Tetangga",
+                    "description": f"Memperbarui jarak ke tetangga dari node {current}",
+                    "neighbor_updates": neighbor_updates,
+                    "updated_distances": distances.copy()
+                })
+        
+        # Reconstruct the path
+        path = []
+        current = end_district
+        
+        while current:
+            path.append(current)
+            current = previous[current]
+        
+        path.reverse()  # Correct the order
+        
+        # Calculate the actual path segments with their properties
+        path_segments = []
+        
+        for i in range(len(path) - 1):
+            start_node = path[i]
+            end_node = path[i + 1]
+            
+            # Get edge data
+            edge_data = G.get_edge_data(start_node, end_node)
+            
+            segment = {
+                "from": start_node,
+                "to": end_node,
+                "distance": edge_data['distance'],
+                "weighted_distance": edge_data['weighted_distance'],
+                "safety_factor": edge_data['safety_factor'],
+                "points_near_route": edge_data['points_near_route'],
+                "from_coords": {
+                    "lat": G.nodes[start_node]['lat'],
+                    "lng": G.nodes[start_node]['lng']
+                },
+                "to_coords": {
+                    "lat": G.nodes[end_node]['lat'],
+                    "lng": G.nodes[end_node]['lng']
+                }
+            }
+            
+            path_segments.append(segment)
+        
+        # Record the final path
+        simulation_results["dijkstra_steps"].append({
+            "step_name": "Hasil Akhir - Jalur Terpendek",
+            "description": f"Jalur terpendek dari {start_district} ke {end_district}",
+            "path": path,
+            "path_segments": path_segments,
+            "total_distance": sum(segment['distance'] for segment in path_segments),
+            "total_weighted_distance": sum(segment['weighted_distance'] for segment in path_segments)
+        })
+        
+        # Convert all Infinity/-Infinity in distances to string '∞' or a large number (e.g. 99999)
+        def safe_distances(d):
+            return {k: (0 if v == 0 else (99999 if v == float('inf') or v == float('-inf') or v == 'Infinity' or v == '-Infinity' else v)) for k, v in d.items()}
+
+        # Saat menambahkan step Dijkstra, pastikan distances sudah diubah
+        # Contoh:
+        # simulation_results["dijkstra_steps"].append({
+        #     ...
+        #     "distances": safe_distances(distances.copy()),
+        #     ...
+        # })
+        #
+        # Atau, setelah semua step selesai, lakukan normalisasi:
+        for step in simulation_results.get("dijkstra_steps", []):
+            if "distances" in step and isinstance(step["distances"], dict):
+                step["distances"] = safe_distances(step["distances"])
+        
+        # After all calculations, clean up all numeric results in simulation_results
+        def safe_numeric(val):
+            try:
+                v = float(val)
+                if np.isnan(v) or np.isinf(v):
+                    return 0
+                return v
+            except Exception:
+                return 0
+        # Clean up final_clusters
+        for cluster in simulation_results.get("final_clusters", {}).values():
+            for point in cluster.get("points", []):
+                for k, v in point.items():
+                    if isinstance(v, (float, int)):
+                        point[k] = safe_numeric(v)
+            cluster["avg_risk_score"] = safe_numeric(cluster.get("avg_risk_score", 0))
+        # Clean up dijkstra_steps
+        for step in simulation_results.get("dijkstra_steps", []):
+            if "distances" in step and isinstance(step["distances"], dict):
+                for k, v in step["distances"].items():
+                    step["distances"][k] = safe_numeric(v)
+            if "neighbor_updates" in step and isinstance(step["neighbor_updates"], list):
+                for upd in step["neighbor_updates"]:
+                    for k, v in upd.items():
+                        if isinstance(v, (float, int)):
+                            upd[k] = safe_numeric(v)
+            if "updated_distances" in step and isinstance(step["updated_distances"], dict):
+                for k, v in step["updated_distances"].items():
+                    step["updated_distances"][k] = safe_numeric(v)
+            if "total_distance" in step:
+                step["total_distance"] = safe_numeric(step["total_distance"])
+            if "total_weighted_distance" in step:
+                step["total_weighted_distance"] = safe_numeric(step["total_weighted_distance"])
+            if "path_segments" in step and isinstance(step["path_segments"], list):
+                for seg in step["path_segments"]:
+                    for k, v in seg.items():
+                        if isinstance(v, (float, int)):
+                            seg[k] = safe_numeric(v)
+        return jsonify(simulation_results)
+        
+    except Exception as e:
+        import traceback
+        app.logger.error(f"Error in simulation data endpoint: {str(e)}")
+        app.logger.error(traceback.format_exc())
+        return jsonify({
+            'status': 'error',
+            'message': f'Gagal menghasilkan data simulasi: {str(e)}',
             'trace': traceback.format_exc()
         }), 500
 
