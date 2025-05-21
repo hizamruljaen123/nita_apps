@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Navigasi Aman - Hindari Rute Rawan Kecelakaan di Aceh Utara & Lhokseumawe</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Poppins', sans-serif;
+        }
+        #map { /* Changed from #map-container for Leaflet initialization */
+            height: calc(100vh - 128px); /* Full viewport height minus header and footer */
+            width: 100%;
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .leaflet-control-container .leaflet-routing-container {
+            background-color: white;
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .control-panel {
+            max-height: calc(100vh - 160px); /* Adjust based on header/footer */
+            overflow-y: auto;
+        }
+        .btn-primary {
+            background-color: #2563eb; /* bg-blue-600 */
+            color: white;
+            font-weight: 600; /* font-semibold */
+            padding-top: 0.5rem; /* py-2 */
+            padding-bottom: 0.5rem; /* py-2 */
+            padding-left: 1rem; /* px-4 */
+            padding-right: 1rem; /* px-4 */
+            border-radius: 0.5rem; /* rounded-lg */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); /* shadow-md */
+            transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform; /* transition */
+            transition-duration: 150ms; /* duration-150 */
+            transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); /* ease-in-out */
+        }
+        .btn-primary:hover {
+            background-color: #1d4ed8; /* hover:bg-blue-700 */
+        }
+        .btn-secondary {
+            background-color: #e5e7eb; /* bg-gray-200 */
+            color: #1f2937; /* text-gray-800 */
+            font-weight: 600; /* font-semibold */
+            padding-top: 0.5rem; /* py-2 */
+            padding-bottom: 0.5rem; /* py-2 */
+            padding-left: 1rem; /* px-4 */
+            padding-right: 1rem; /* px-4 */
+            border-radius: 0.5rem; /* rounded-lg */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); /* shadow-md */
+            transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
+            transition-duration: 150ms;
+            transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .btn-secondary:hover {
+            background-color: #d1d5db; /* hover:bg-gray-300 */
+        }
+        .input-field {
+            display: block;
+            width: 100%;
+            padding: 0.5rem; /* p-2 */
+            border: 1px solid #d1d5db; /* border border-gray-300 */
+            border-radius: 0.375rem; /* rounded-md */
+            box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05); /* shadow-sm */
+            font-size: 0.875rem; /* sm:text-sm */
+            line-height: 1.25rem;
+        }
+        .input-field:focus {
+            outline: 2px solid transparent;
+            outline-offset: 2px;
+            border-color: #2563eb; /* focus:border-blue-500 */
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.5); /* focus:ring-blue-500 (approximated) */
+        }
+        /* Custom scrollbar for control panel */
+        .control-panel::-webkit-scrollbar {
+            width: 8px;
+        }
+        .control-panel::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        .control-panel::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        .control-panel::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            backdrop-filter: blur(5px); /* Frosted glass effect */
+        }
+        .loading-content {
+            background: white;
+            padding: 2.5rem; /* Increased padding */
+            border-radius: 0.75rem; /* More rounded corners */
+            text-align: center;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1); /* Softer shadow */
+            color: #333; /* Darker text for better contrast */
+        }
+        .spinner {
+            border: 5px solid #e0e0e0; /* Lighter border */
+            border-top: 5px solid #3b82f6; /* Blue accent */
+            border-radius: 50%;
+            width: 50px; /* Larger spinner */
+            height: 50px;
+            animation: spin 1.2s linear infinite; /* Slightly slower spin */
+            margin: 0 auto 1.5rem auto; /* Centered with more bottom margin */
+        }
+        .hidden {
+            display: none;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div class="min-h-screen flex flex-col">
+        <!-- Header -->
+        <header class="bg-gradient-to-r from-blue-600 to-indigo-700 text-white p-4 shadow-lg sticky top-0 z-50">
+            <div class="container mx-auto flex justify-between items-center">
+                <div>
+                    <h1 class="text-3xl font-bold">Navigasi Aman</h1>
+                    <p class="text-sm opacity-90">Rute Teraman di Aceh Utara & Lhokseumawe</p>
+                </div>
+                <!-- Placeholder for potential future elements like user login -->
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="flex-grow container mx-auto p-4 flex flex-col lg:flex-row gap-6">
+            <!-- Control Panel (Sidebar) -->
+            <div class="lg:w-1/3 bg-white rounded-xl shadow-xl p-6 control-panel">
+                <h2 class="text-2xl font-semibold mb-6 text-gray-800 border-b pb-3">Pencarian Rute Aman</h2>
+                
+                <div class="space-y-6">
+                    <div>
+                        <label for="start-location-select" class="block text-sm font-medium text-gray-700 mb-1">Titik Awal:</label>
+                        <select id="start-location-select" class="input-field">
+                            <option value="">Pilih titik awal...</option>
+                            <!-- Options will be populated by JavaScript -->
+                        </select>
+                    </div>
+
+                    <div>
+                        <label for="intermediate-location-select" class="block text-sm font-medium text-gray-700 mb-1">Tambah Titik Perantara (Via):</label>
+                        <div class="flex items-center space-x-2">
+                            <select id="intermediate-location-select" class="input-field flex-grow">
+                                <option value="">Pilih titik perantara...</option>
+                                <!-- Options will be populated by JavaScript -->
+                            </select>
+                            <button id="add-intermediate-btn" class="btn-secondary px-3 py-2 text-sm">Tambah</button>
+                        </div>
+                        <ul id="intermediate-waypoints-list" class="mt-3 space-y-2 text-sm">
+                            <!-- Selected intermediate waypoints will be listed here -->
+                            <!-- Example: <li class="flex justify-between items-center bg-gray-100 p-2 rounded"><span>District Name</span><button class="text-red-500 hover:text-red-700">X</button></li> -->
+                        </ul>
+                    </div>
+
+                    <div>
+                        <label for="end-location-select" class="block text-sm font-medium text-gray-700 mb-1">Titik Tujuan:</label>
+                        <select id="end-location-select" class="input-field">
+                            <option value="">Pilih titik tujuan...</option>
+                            <!-- Options will be populated by JavaScript -->
+                        </select>
+                    </div>
+                    
+                    <div class="flex space-x-3">
+                        <button id="find-route-btn" class="btn-primary w-full flex items-center justify-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M12.293 5.293a1 1 0 011.414 0l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-2.293-2.293a1 1 0 010-1.414z" clip-rule="evenodd" />
+                            </svg>
+                            Cari Rute
+                        </button>
+                        <button id="clear-route-btn" class="btn-secondary w-full">Bersihkan</button>
+                    </div>
+
+                    <div id="route-info" class="mt-6 p-4 bg-gray-50 rounded-lg shadow hidden">
+                        <h3 class="text-lg font-semibold text-gray-700 mb-2">Informasi Rute:</h3>
+                        <p id="route-details" class="text-sm text-gray-600"></p>
+                        <!-- More details can be added here -->
+                    </div>
+                    
+                    <hr class="my-6">
+
+                    <div>
+                        <h3 class="text-xl font-semibold mb-3 text-gray-700">Analisis Klaster</h3>
+                        <button id="calculate-clusters-btn" class="btn-primary w-full">Hitung Klaster Rawan</button>
+                    </div>
+                     <div id="cluster-info" class="mt-4 p-3 bg-indigo-50 rounded-lg shadow hidden">
+                        <p id="cluster-details" class="text-sm text-indigo-700"></p>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Map Area -->
+            <div class="lg:w-2/3 bg-white rounded-xl shadow-xl overflow-hidden">
+                <div id="map"></div> <!-- Map will be initialized here -->
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="bg-gray-900 text-white p-6 text-center text-sm">
+            <p>&copy; <span id="current-year"></span> Navigasi Aman Aceh. Hak Cipta Dilindungi.</p>
+            <p class="text-xs opacity-70">Powered by Data Analitik & Sistem Informasi Geografis</p>
+        </footer>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="loading-content">
+            <div class="spinner"></div>
+            <div id="loading-message">Memproses...</div>
+        </div>
+    </div>
+
+<script>
+    let map;
+    let districtData = {}; // To store district names and their coordinates/data
+    let routeControl = null; // To store the Leaflet Routing Machine control
+    let startMarker = null;
+    let endMarker = null;
+    let clusterLayerGroup = L.layerGroup(); // Layer group for cluster markers
+    let currentRouteLayer = null; // To store the current route GeoJSON layer
+    let intermediateWaypoints = []; // Array to store intermediate waypoints {name, lat, lng}
+
+    const loadingOverlay = document.getElementById('loading-overlay');
+    const loadingMessage = document.getElementById('loading-message');
+
+    function showLoading(message = 'Memuat data...') {
+        loadingMessage.textContent = message;
+        loadingOverlay.classList.remove('hidden');
+    }
+
+    function hideLoading() {
+        loadingOverlay.classList.add('hidden');
+    }
+    
+    document.getElementById('current-year').textContent = new Date().getFullYear();
+
+    // Initialize map when the page loads
+    document.addEventListener('DOMContentLoaded', () => {
+        showLoading('Menginisialisasi peta...');
+        map = L.map('map').setView([5.10, 97.15], 9.5); // Adjusted center and zoom for Aceh Utara & Lhokseumawe
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors | Navigasi Aman Aceh'
+        }).addTo(map);
+        clusterLayerGroup.addTo(map); // Add cluster layer group to map
+
+        fetchInitialData();
+    });
+
+    async function fetchInitialData() {
+        try {
+            const response = await fetch('/initial_data');
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+
+            if (data.status === 'success' && data.district_options) { // Expecting district_options
+                districtData = {}; // Reset
+                const startSelect = document.getElementById('start-location-select');
+                const endSelect = document.getElementById('end-location-select');
+                const intermediateSelect = document.getElementById('intermediate-location-select');
+
+                startSelect.innerHTML = '<option value="">Pilih titik awal...</option>'; // Clear existing options
+                endSelect.innerHTML = '<option value="">Pilih titik tujuan...</option>'; // Clear existing options
+                intermediateSelect.innerHTML = '<option value="">Pilih titik perantara...</option>'; // Clear existing options
+                
+                data.district_options.sort((a,b) => a.name.localeCompare(b.name)).forEach(districtInfo => {
+                    districtData[districtInfo.name] = districtInfo; // Store name, lat, lng
+                    const option = document.createElement('option');
+                    option.value = districtInfo.name;
+                    option.textContent = districtInfo.name;
+                    startSelect.appendChild(option.cloneNode(true));
+                    endSelect.appendChild(option.cloneNode(true));
+                    intermediateSelect.appendChild(option.cloneNode(true));
+                });
+
+            } else {
+                console.error('Gagal memuat data awal:', data.message || 'Format data tidak sesuai');
+                alert('Gagal memuat data awal. Coba lagi nanti.');
+            }
+        } catch (error) {
+            console.error('Error saat mengambil data awal:', error);
+            alert(`Terjadi kesalahan: ${error.message}. Pastikan server berjalan.`);
+        } finally {
+            hideLoading();
+        }
+    }
+    
+    // Placeholder for plotting initial points if desired
+    // function plotInitialPoints(pointsData) {
+    //     pointsData.forEach(point => {
+    //         L.circleMarker([point.lat, point.lng], {
+    //             radius: 5,
+    //             color: 'blue',
+    //             fillColor: '#3085d6',
+    //             fillOpacity: 0.8
+    //         }).addTo(map).bindPopup(`<b>${point.district}</b><br>Data point`);
+    //     });
+    // }
+
+    // Calculate clusters
+    document.getElementById('calculate-clusters-btn').addEventListener('click', async () => {
+        showLoading('Menghitung klaster kerawanan...');
+        try {
+            const response = await fetch('/calculate_clusters');
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+            const data = await response.json();
+            
+            if (data.status === 'success' && data.cluster_data) {
+                clusterLayerGroup.clearLayers(); // Clear previous cluster markers
+
+                // Plot cluster points
+                data.cluster_data.clusters.forEach(point => {
+                    let color = 'gray'; // Default
+                    if (point.risk_level === 'High') color = 'red';
+                    else if (point.risk_level === 'Medium') color = 'orange';
+                    else if (point.risk_level === 'Low') color = 'green';
+
+                    L.circleMarker([point.lat, point.lng], {
+                        radius: 6, // Adjust size as needed
+                        color: color,
+                        fillColor: color,
+                        fillOpacity: 0.7,
+                        weight: 1
+                    }).addTo(clusterLayerGroup)
+                      .bindPopup(`<b>${point.district}</b><br>Klaster: ${point.cluster}<br>Risiko: ${point.risk_level}<br>Kecelakaan: ${point.accidents}<br>Fatalitas: ${point.fatalities}`);
+                });
+
+                // Plot medoids (cluster centers)
+                if (data.cluster_data.medoids) {
+                    data.cluster_data.medoids.forEach(medoid => {
+                        L.marker([medoid.lat, medoid.lng], {
+                            icon: L.divIcon({
+                                className: 'custom-div-icon',
+                                html: `<div style='background-color:${medoid.color || 'blue'};width:12px;height:12px;border-radius:50%;border:2px solid white; box-shadow: 0 0 5px #000;' title='Pusat Klaster ${medoid.cluster}'></div>`,
+                                iconSize: [12, 12],
+                                iconAnchor: [6, 6]
+                            })
+                        }).addTo(clusterLayerGroup)
+                          .bindPopup(`<b>Pusat Klaster ${medoid.cluster}</b><br>Distrik: ${medoid.district}<br>Risiko Dominan: ${medoid.risk_level || 'N/A'}`);
+                    });
+                }
+                
+                document.getElementById('cluster-details').textContent = 'Klaster kerawanan berhasil diperbarui di peta.';
+                document.getElementById('cluster-info').classList.remove('hidden');
+                // alert('Klaster berhasil dihitung dan ditampilkan di peta!'); // Alert can be annoying, using text update instead
+
+            } else {
+                console.error('Gagal menghitung klaster:', data.message);
+                alert(`Gagal menghitung klaster: ${data.message || 'Error tidak diketahui'}`);
+                document.getElementById('cluster-details').textContent = `Error: ${data.message || 'Gagal menghitung klaster.'}`;
+                document.getElementById('cluster-info').classList.remove('hidden');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert(`Terjadi kesalahan saat menghitung klaster: ${error.message}`);
+            document.getElementById('cluster-details').textContent = `Error: ${error.message}`;
+            document.getElementById('cluster-info').classList.remove('hidden');
+        } finally {
+            hideLoading();
+        }
+    });
+    
+    // Add Intermediate Waypoint Handler
+    document.getElementById('add-intermediate-btn').addEventListener('click', () => {
+        const intermediateSelect = document.getElementById('intermediate-location-select');
+        const districtName = intermediateSelect.value;
+
+        if (districtName && districtData[districtName]) {
+            // Avoid adding duplicates or too many waypoints (optional limit)
+            if (intermediateWaypoints.find(wp => wp.name === districtName)) {
+                alert('Titik perantara ini sudah ditambahkan.');
+                return;
+            }
+            if (intermediateWaypoints.length >= 5) { // Example limit
+                alert('Maksimal 5 titik perantara yang bisa ditambahkan.');
+                return;
+            }
+
+            const waypointData = districtData[districtName];
+            intermediateWaypoints.push({
+                name: waypointData.name,
+                lat: waypointData.lat,
+                lng: waypointData.lng
+            });
+            renderIntermediateWaypointsList();
+            intermediateSelect.value = ''; // Reset dropdown
+        } else {
+            alert('Pilih titik perantara yang valid.');
+        }
+    });
+
+    function renderIntermediateWaypointsList() {
+        const listElement = document.getElementById('intermediate-waypoints-list');
+        listElement.innerHTML = ''; // Clear current list
+
+        intermediateWaypoints.forEach((waypoint, index) => {
+            const li = document.createElement('li');
+            li.className = 'flex justify-between items-center bg-gray-100 p-2 rounded shadow-sm';
+            
+            const span = document.createElement('span');
+            span.textContent = `${index + 1}. ${waypoint.name}`;
+            li.appendChild(span);
+
+            const removeBtn = document.createElement('button');
+            removeBtn.className = 'text-red-500 hover:text-red-700 font-semibold px-2';
+            removeBtn.textContent = 'X';
+            removeBtn.onclick = () => removeIntermediateWaypoint(index);
+            li.appendChild(removeBtn);
+
+            listElement.appendChild(li);
+        });
+    }
+
+    function removeIntermediateWaypoint(indexToRemove) {
+        intermediateWaypoints.splice(indexToRemove, 1);
+        renderIntermediateWaypointsList();
+    }
+
+
+    // Find route handler
+    document.getElementById('find-route-btn').addEventListener('click', async () => {
+        const startDistrictName = document.getElementById('start-location-select').value;
+        const endDistrictName = document.getElementById('end-location-select').value;
+
+        if (!startDistrictName || !endDistrictName) {
+            alert('Pilih titik awal dan tujuan terlebih dahulu.');
+            return;
+        }
+
+        const startPointData = districtData[startDistrictName];
+        const endPointData = districtData[endDistrictName];
+
+        if (!startPointData || !endPointData) {
+            alert('Data lokasi untuk titik awal atau tujuan tidak ditemukan. Harap muat ulang halaman.');
+            return;
+        }
+        
+        const finalWaypoints = [];
+        finalWaypoints.push({ district: startPointData.name, lat: startPointData.lat, lng: startPointData.lng });
+        
+        intermediateWaypoints.forEach(wp => {
+            finalWaypoints.push({ district: wp.name, lat: wp.lat, lng: wp.lng });
+        });
+
+        finalWaypoints.push({ district: endPointData.name, lat: endPointData.lat, lng: endPointData.lng });
+        
+        // Ensure at least two unique points
+        if (finalWaypoints.length < 2) {
+             alert('Minimal harus ada dua titik untuk membentuk rute.');
+             return;
+        }
+
+        showLoading('Mencari rute teraman...');
+        document.getElementById('route-info').classList.add('hidden');
+
+        try {
+            const response = await fetch('/find_route', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ waypoints: finalWaypoints })
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            if (data.status !== 'success' || !data.route_geojson || !data.route_geojson.features) {
+                throw new Error('Data rute tidak lengkap dari server.');
+            }
+            
+            if (currentRouteLayer) {
+                map.removeLayer(currentRouteLayer);
+            }
+            if (startMarker) map.removeLayer(startMarker);
+            if (endMarker) map.removeLayer(endMarker);
+            
+            // Handle the route data
+            const routeGeoJson = data.route_geojson;
+            const waypointsData = data.waypoints_info || finalWaypoints; // Use fallback if missing
+            
+            if (routeGeoJson && routeGeoJson.features && routeGeoJson.features.length > 0) {
+                currentRouteLayer = L.geoJSON(routeGeoJson, {
+                    style: function (feature) {
+                        let color = '#808080'; // Default gray for unknown safety level
+                        let weight = 5;
+                        let opacity = 0.85;
+                        if (feature.properties && feature.properties.safety_level) {
+                            switch (feature.properties.safety_level.toLowerCase()) {
+                                case 'safe':
+                                case 'low':
+                                    color = '#28a745'; // Green
+                                    break;
+                                case 'danger':
+                                case 'high':
+                                    color = '#dc3545'; // Red
+                                    break;
+                                case 'moderate':
+                                case 'medium':
+                                    color = '#ffc107'; // Orange/Yellow
+                                    break;
+                            }
+                        }
+                        return { color: color, weight: weight, opacity: opacity };
+                    },
+                    onEachFeature: function (feature, layer) {
+                        if (feature.properties) {
+                            let popupContent = `<b>Segmen Rute</b><br>`;
+                            if (feature.properties.safety_level) {
+                                const safetyLevelText = feature.properties.safety_level.charAt(0).toUpperCase() + feature.properties.safety_level.slice(1);
+                                popupContent += `Tingkat Keamanan: ${safetyLevelText}<br>`;
+                            }
+                            if (typeof feature.properties.distanceKm !== 'undefined') {
+                                popupContent += `Panjang: ${feature.properties.distanceKm.toFixed(2)} km<br>`;
+                            }
+                            if (typeof feature.properties.timeMinutes !== 'undefined') {
+                                popupContent += `Waktu Tempuh: ${feature.properties.timeMinutes.toFixed(0)} menit`;
+                            }
+                            layer.bindPopup(popupContent);
+                        }
+                    }
+                }).addTo(map);
+                
+                map.fitBounds(currentRouteLayer.getBounds().pad(0.1));
+                
+                // Add markers for start and end points
+                const firstWaypoint = waypointsData[0];
+                const lastWaypoint = waypointsData[waypointsData.length - 1];
+                
+                startMarker = L.marker([firstWaypoint.lat, firstWaypoint.lng], {
+                    icon: L.icon({
+                        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+                        iconSize: [25, 41],
+                        iconAnchor: [12, 41],
+                        popupAnchor: [1, -34],
+                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+                        shadowSize: [41, 41]
+                    })
+                }).addTo(map).bindPopup(`<b>Mulai:</b> ${firstWaypoint.name || firstWaypoint.district || 'Titik Awal'}`);
+                
+                endMarker = L.marker([lastWaypoint.lat, lastWaypoint.lng], {
+                    icon: L.icon({
+                        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+                        iconSize: [25, 41],
+                        iconAnchor: [12, 41],
+                        popupAnchor: [1, -34],
+                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+                        shadowSize: [41, 41]
+                    })
+                }).addTo(map).bindPopup(`<b>Tujuan:</b> ${lastWaypoint.name || lastWaypoint.district || 'Titik Akhir'}`);
+                
+                // Show route summary
+                if (data.route_summary) {
+                    document.getElementById('route-details').innerHTML = `
+                        Rute teraman dari <strong>${firstWaypoint.name || firstWaypoint.district || 'Titik Awal'}</strong> 
+                        ke <strong>${lastWaypoint.name || lastWaypoint.district || 'Titik Akhir'}</strong> ditemukan.<br>
+                        Panjang: ${data.route_summary.totalDistanceKm.toFixed(2)} km. 
+                        Waktu: ${data.route_summary.totalTimeMinutes.toFixed(0)} menit.
+                    `;
+                } else {
+                    // Calculate summary from segments if needed
+                    let totalDistance = 0;
+                    let totalTime = 0;
+                    routeGeoJson.features.forEach(feature => {
+                        if (feature.properties) {
+                            totalDistance += feature.properties.distanceKm || 0;
+                            totalTime += feature.properties.timeMinutes || 0;
+                        }
+                    });
+                    
+                    document.getElementById('route-details').innerHTML = `
+                        Rute teraman dari <strong>${firstWaypoint.name || firstWaypoint.district || 'Titik Awal'}</strong> 
+                        ke <strong>${lastWaypoint.name || lastWaypoint.district || 'Titik Akhir'}</strong> ditemukan.<br>
+                        Panjang: ${totalDistance.toFixed(2)} km. 
+                        Waktu: ${totalTime.toFixed(0)} menit.
+                    `;
+                }
+                
+                document.getElementById('route-info').classList.remove('hidden');
+            } else {
+                throw new Error('Data rute tidak lengkap atau kosong.');
+            }
+        } catch (error) {
+            console.error('Error:', error);
+            alert(`Terjadi kesalahan saat mencari rute: ${error.message}`);
+            document.getElementById('route-details').textContent = `Error: ${error.message}`;
+            document.getElementById('route-info').classList.remove('hidden');
+        } finally {
+            hideLoading();
+        }
+    });    // This function was replaced by enhanced code in the 'find-route-btn' event listener
+    // The redundant fetchRoute function has been removed
+    
+    // Clear route handler
+    document.getElementById('clear-route-btn').addEventListener('click', () => {
+        if (currentRouteLayer) {
+            map.removeLayer(currentRouteLayer);
+            currentRouteLayer = null;
+        }
+        if (startMarker) {
+            map.removeLayer(startMarker);
+            startMarker = null;
+        }
+        if (endMarker) {
+            map.removeLayer(endMarker);
+            endMarker = null;
+        }
+        
+        document.getElementById('start-location-select').value = '';
+        document.getElementById('end-location-select').value = '';
+        document.getElementById('intermediate-location-select').value = '';
+        intermediateWaypoints = [];
+        renderIntermediateWaypointsList();
+        document.getElementById('route-info').classList.add('hidden');
+        document.getElementById('route-details').innerHTML = '';
+        // map.setView([5.10, 97.15], 9.5); // Optionally reset map view
+        // alert('Pilihan rute dan tampilan peta telah dibersihkan.');
+    });
+
+</script>
+</body>
+</html>

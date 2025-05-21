@@ -1,0 +1,7 @@
+flask
+numpy
+folium
+scikit-learn-extra
+pandas
+networkx
+requests
