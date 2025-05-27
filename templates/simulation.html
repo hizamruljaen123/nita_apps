@@ -19,11 +19,11 @@
     <div class="w-56 flex-shrink-0 pr-6">
         <div class="sticky top-8">
             <div class="flex flex-col gap-2">
-                <button class="tab-btn text-left px-4 py-3 rounded-lg font-semibold text-blue-800 bg-blue-100 hover:bg-blue-200 focus:bg-blue-300 transition" data-tab="tab1">1. Pengumpulan Data</button>
-                <button class="tab-btn text-left px-4 py-3 rounded-lg font-semibold text-blue-800 bg-blue-100 hover:bg-blue-200 focus:bg-blue-300 transition" data-tab="tab2">2. Proses K-Medoids</button>
-                <button class="tab-btn text-left px-4 py-3 rounded-lg font-semibold text-blue-800 bg-blue-100 hover:bg-blue-200 focus:bg-blue-300 transition" data-tab="tab3">3. Hasil Klaster Akhir</button>
-                <button class="tab-btn text-left px-4 py-3 rounded-lg font-semibold text-blue-800 bg-blue-100 hover:bg-blue-200 focus:bg-blue-300 transition" data-tab="tab4">4. Proses Dijkstra</button>
-                <button class="tab-btn text-left px-4 py-3 rounded-lg font-semibold text-blue-800 bg-blue-100 hover:bg-blue-200 focus:bg-blue-300 transition" data-tab="tab5">5. Visualisasi Jalur (Peta)</button>
+                <button data-tab="tab1" class="tab-btn text-left w-full px-4 py-2 rounded-lg transition duration-150 ease-in-out">1. Data & Praproses</button>
+                <button data-tab="tab2" class="tab-btn text-left w-full px-4 py-2 rounded-lg transition duration-150 ease-in-out">2. K-Medoids</button>
+                <button data-tab="tab3" class="tab-btn text-left w-full px-4 py-2 rounded-lg transition duration-150 ease-in-out">3. Klaster Final</button>
+                <button data-tab="tab4" class="tab-btn text-left w-full px-4 py-2 rounded-lg transition duration-150 ease-in-out">4. Dijkstra Steps</button>
+                <button data-tab="tab5" class="tab-btn text-left w-full px-4 py-2 rounded-lg transition duration-150 ease-in-out">5. Peta Rute</button>
             </div>
         </div>
     </div>
@@ -127,13 +127,39 @@
 // Vertical Tabs Logic
 const tabBtns = document.querySelectorAll('.tab-btn');
 const tabContents = document.querySelectorAll('.tab-content');
+let dijkstraMapInstance = null; // Declare map instance variable
+
 function activateTab(tabId) {
     tabContents.forEach(tc => tc.classList.add('hidden'));
-    document.getElementById(tabId).classList.remove('hidden');
-    tabBtns.forEach(btn => btn.classList.remove('bg-blue-300', 'ring-2', 'ring-blue-400'));
+    const activeTabContent = document.getElementById(tabId);
+    if (activeTabContent) {
+        activeTabContent.classList.remove('hidden');
+    }
+
+    // Reset styles for all buttons
+    tabBtns.forEach(btn => {
+        btn.classList.remove('bg-blue-500', 'text-white', 'font-semibold', 'ring-2', 'ring-blue-400');
+        btn.classList.add('bg-blue-100', 'hover:bg-blue-200', 'text-blue-700');
+    });
+
+    // Apply active style to the clicked button
     const activeBtn = Array.from(tabBtns).find(btn => btn.dataset.tab === tabId);
-    if (activeBtn) activeBtn.classList.add('bg-blue-300', 'ring-2', 'ring-blue-400');
+    if (activeBtn) {
+        activeBtn.classList.remove('bg-blue-100', 'hover:bg-blue-200', 'text-blue-700');
+        activeBtn.classList.add('bg-blue-500', 'text-white', 'font-semibold', 'ring-2', 'ring-blue-400');
+    }
+
+    // If the activated tab contains the Dijkstra map, invalidate its size
+    if (activeTabContent && activeTabContent.querySelector('#dijkstra-map')) {
+        if (dijkstraMapInstance) {
+            // Delay slightly to ensure the tab is fully rendered and sized
+            setTimeout(() => {
+                dijkstraMapInstance.invalidateSize();
+            }, 50);
+        }
+    }
 }
+
 tabBtns.forEach(btn => {
     btn.addEventListener('click', () => activateTab(btn.dataset.tab));
 });
@@ -210,6 +236,25 @@ document.addEventListener('DOMContentLoaded', function() {
             val === '-Infinity' ||
             val === '∞'
         ) return fallback;
+
+        // Jika angka, format ke 5 desimal jika perlu
+        if (typeof val === 'number' && val % 1 !== 0) {
+            // Check if it's a float
+            const roundedVal = parseFloat(val.toFixed(5));
+            // Check if rounding made it an integer (e.g., 2.000001 rounded to 2)
+            // or if it was already an integer that toFixed turned into x.00000
+            // We only want to keep decimals if they are significant after rounding.
+            if (Math.abs(roundedVal - Math.round(roundedVal)) < 0.000001 && Math.round(roundedVal) === roundedVal) {
+                 // If it effectively became an integer or was an integer, show as integer
+                 // Or if it's something like 2.0, 2.00, etc.
+                 if (String(val).includes('.') && parseFloat(String(val).split('.')[1]) === 0) {
+                    return Math.round(roundedVal); // e.g. 2.00000 -> 2
+                 } else if (String(roundedVal).includes('.') && parseFloat(String(roundedVal).split('.')[1]) === 0){
+                    return Math.round(roundedVal); // e.g. 1.999999 -> 2
+                 }
+            }
+            return roundedVal.toString(); // Return as string to preserve trailing zeros if toFixed created them and they are significant
+        }
         return val;
     }
 
@@ -439,25 +484,92 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function renderDijkstraMap(steps) {
-        if (!steps || steps.length === 0) return;
+        const mapContainer = document.getElementById('dijkstra-map');
+        if (!mapContainer) {
+            console.error('Map container #dijkstra-map not found!');
+            return;
+        }
+
+        // If a map instance already exists, remove it before creating a new one
+        if (dijkstraMapInstance) {
+            dijkstraMapInstance.remove();
+            dijkstraMapInstance = null;
+        }
+
+        if (!steps || steps.length === 0) {
+            mapContainer.innerHTML = '<div class="p-4 text-center text-gray-500">Data langkah Dijkstra tidak tersedia untuk peta.</div>';
+            return;
+        }
+        
         let lastStep = [...steps].reverse().find(s => s.path_segments);
-        if (!lastStep) return;
-        let map = L.map('dijkstra-map').setView([lastStep.path_segments[0].from_coords.lat, lastStep.path_segments[0].from_coords.lng], 10);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            maxZoom: 18,
-        }).addTo(map);
-        let latlngs = [];
-        lastStep.path_segments.forEach(seg => {
-            latlngs.push([seg.from_coords.lat, seg.from_coords.lng]);
-        });
-        let last = lastStep.path_segments[lastStep.path_segments.length-1];
-        latlngs.push([last.to_coords.lat, last.to_coords.lng]);
-        let polyline = L.polyline(latlngs, {color: '#ef4444', weight: 6}).addTo(map);
-        map.fitBounds(polyline.getBounds());
-        lastStep.path_segments.forEach(seg => {
-            L.marker([seg.from_coords.lat, seg.from_coords.lng], {icon: L.icon({iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png', iconSize: [28, 28]})}).addTo(map).bindPopup(seg.from);
-        });
-        L.marker([last.to_coords.lat, last.to_coords.lng], {icon: L.icon({iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png', iconSize: [28, 28]})}).addTo(map).bindPopup(last.to);
+        if (!lastStep || !lastStep.path_segments || lastStep.path_segments.length === 0) {
+            mapContainer.innerHTML = '<div class="p-4 text-center text-gray-500">Data jalur (path segments) tidak ditemukan untuk ditampilkan di peta.</div>';
+            // Optionally, initialize a map with a default view if desired even with no path
+            // dijkstraMapInstance = L.map('dijkstra-map').setView([5.10, 97.20], 9); // Aceh Utara/Lhokseumawe
+            // L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            //     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+            //     maxZoom: 18,
+            // }).addTo(dijkstraMapInstance);
+            return;
+        }
+
+        const firstSegment = lastStep.path_segments[0];
+        let initialCoords = [5.10, 97.20]; // Default initial coords (Lhokseumawe/Aceh Utara general area)
+        let initialZoom = 9;
+
+        if (firstSegment && firstSegment.from_coords && typeof firstSegment.from_coords.lat === 'number' && typeof firstSegment.from_coords.lng === 'number') {
+            initialCoords = [firstSegment.from_coords.lat, firstSegment.from_coords.lng];
+            initialZoom = 10;
+        }
+
+        try {
+            dijkstraMapInstance = L.map('dijkstra-map').setView(initialCoords, initialZoom);
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+                maxZoom: 18,
+            }).addTo(dijkstraMapInstance);
+
+            let latlngs = [];
+            lastStep.path_segments.forEach(seg => {
+                if (seg.from_coords && typeof seg.from_coords.lat === 'number' && typeof seg.from_coords.lng === 'number') {
+                    latlngs.push([seg.from_coords.lat, seg.from_coords.lng]);
+                }
+            });
+            
+            const lastSegmentData = lastStep.path_segments[lastStep.path_segments.length - 1];
+            if (lastSegmentData && lastSegmentData.to_coords && typeof lastSegmentData.to_coords.lat === 'number' && typeof lastSegmentData.to_coords.lng === 'number') {
+                latlngs.push([lastSegmentData.to_coords.lat, lastSegmentData.to_coords.lng]);
+            }
+
+            if (latlngs.length > 1) { // Need at least two points for a polyline
+                let polyline = L.polyline(latlngs, { color: '#ef4444', weight: 6 }).addTo(dijkstraMapInstance);
+                dijkstraMapInstance.fitBounds(polyline.getBounds());
+            } else if (latlngs.length === 1) { // Only one point, just center on it
+                 dijkstraMapInstance.setView(latlngs[0], 13); // Zoom in a bit more for a single point
+            }
+            // If latlngs is empty, map is already centered on initialCoords
+
+            lastStep.path_segments.forEach(seg => {
+                if (seg.from_coords && typeof seg.from_coords.lat === 'number' && typeof seg.from_coords.lng === 'number' && seg.from) {
+                    L.marker([seg.from_coords.lat, seg.from_coords.lng], { icon: L.icon({ iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png', iconSize: [28, 28], iconAnchor: [14, 28], popupAnchor: [0, -28] }) }).addTo(dijkstraMapInstance).bindPopup(seg.from);
+                }
+            });
+            if (lastSegmentData && lastSegmentData.to_coords && typeof lastSegmentData.to_coords.lat === 'number' && typeof lastSegmentData.to_coords.lng === 'number' && lastSegmentData.to) {
+                L.marker([lastSegmentData.to_coords.lat, lastSegmentData.to_coords.lng], { icon: L.icon({ iconUrl: 'https://cdn-icons-png.flaticon.com/512/684/684908.png', iconSize: [28, 28], iconAnchor: [14, 28], popupAnchor: [0, -28] }) }).addTo(dijkstraMapInstance).bindPopup(lastSegmentData.to);
+            }
+            
+            // Ensure map size is correct if it was initialized while hidden
+            // This is primarily handled by activateTab, but an extra call here after data load might be safe
+            setTimeout(() => {
+                if (dijkstraMapInstance && mapContainer.offsetParent !== null) { // Check if visible
+                     dijkstraMapInstance.invalidateSize();
+                }
+            }, 100);
+
+        } catch (e) {
+            console.error("Error rendering Dijkstra map:", e);
+            mapContainer.innerHTML = `<div class="p-4 text-center text-red-500">Error rendering map: ${e.message}. Periksa konsol untuk detail.</div>`;
+        }
     }
 
     function renderTable(data, title) {

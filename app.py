@@ -5,7 +5,6 @@ import random
 import folium
 import networkx as nx
 import requests # Make sure to install requests: pip install requests
-from sklearn_extra.cluster import KMedoids
 from math import radians, sin, cos, sqrt, atan2 # Added for Haversine
 from sklearn.manifold import TSNE
 
@@ -78,6 +77,7 @@ def generate_dummy_data():
     return pd.DataFrame(locations)
 
 def perform_clustering(data, n_clusters=3):
+    """Manual K-medoids clustering implementation"""
     if data.empty or len(data) < n_clusters:
         # Not enough data to cluster, return empty or handle as error
         return data, [], pd.DataFrame() # Added empty DataFrame for medoid_data
@@ -85,12 +85,117 @@ def perform_clustering(data, n_clusters=3):
     features = data[['fatalities', 'road_condition', 'accidents', 'traffic']]
     # Ensure features are numeric and handle potential NaNs (though dummy data shouldn't have them)
     features = features.apply(pd.to_numeric, errors='coerce').fillna(0)
-
-    kmedoids = KMedoids(n_clusters=n_clusters, random_state=42, method='pam') # Specify PAM for robustness
-    data['cluster'] = kmedoids.fit_predict(features)
-    medoid_indices = kmedoids.medoid_indices_
+    
+    # Manual K-medoids implementation
+    medoid_indices, cluster_labels = manual_kmedoids(features.values, n_clusters, random_state=42)
+    
+    # Add cluster labels to data
+    data['cluster'] = cluster_labels
     medoid_data = data.iloc[medoid_indices].copy() # Create a copy to avoid SettingWithCopyWarning
     return data, medoid_indices, medoid_data
+
+def manual_kmedoids(X, n_clusters, max_iterations=100, random_state=None):
+    """
+    Manual implementation of K-medoids clustering algorithm
+    
+    Parameters:
+    - X: feature matrix (n_samples, n_features)
+    - n_clusters: number of clusters
+    - max_iterations: maximum number of iterations
+    - random_state: random seed for reproducibility
+    
+    Returns:
+    - medoid_indices: indices of the medoid points
+    - cluster_labels: cluster assignment for each point
+    """
+    if random_state is not None:
+        np.random.seed(random_state)
+    
+    n_samples, n_features = X.shape
+    
+    # Step 1: Initialize medoids randomly
+    medoid_indices = np.random.choice(n_samples, n_clusters, replace=False)
+    
+    for iteration in range(max_iterations):
+        # Step 2: Assign each point to the closest medoid
+        distances_to_medoids = np.zeros((n_samples, n_clusters))
+        
+        for i, medoid_idx in enumerate(medoid_indices):
+            medoid = X[medoid_idx]
+            for j in range(n_samples):
+                # Calculate Euclidean distance
+                distances_to_medoids[j, i] = np.sqrt(np.sum((X[j] - medoid) ** 2))
+        
+        # Assign each point to closest medoid
+        cluster_labels = np.argmin(distances_to_medoids, axis=1)
+        
+        # Step 3: Calculate current total cost
+        current_cost = 0
+        for cluster_id in range(n_clusters):
+            cluster_points = np.where(cluster_labels == cluster_id)[0]
+            if len(cluster_points) > 0:
+                medoid = X[medoid_indices[cluster_id]]
+                for point_idx in cluster_points:
+                    current_cost += np.sqrt(np.sum((X[point_idx] - medoid) ** 2))
+        
+        # Step 4: Try to improve medoids
+        improved = False
+        best_medoids = medoid_indices.copy()
+        best_cost = current_cost
+        
+        # For each cluster, try replacing the medoid with each point in the cluster
+        for cluster_id in range(n_clusters):
+            cluster_points = np.where(cluster_labels == cluster_id)[0]
+            
+            for candidate_idx in cluster_points:
+                if candidate_idx == medoid_indices[cluster_id]:
+                    continue  # Skip if it's already the medoid
+                
+                # Test this candidate as new medoid
+                test_medoids = medoid_indices.copy()
+                test_medoids[cluster_id] = candidate_idx
+                
+                # Recalculate distances and assignments with new medoid
+                test_distances = np.zeros((n_samples, n_clusters))
+                for i, test_medoid_idx in enumerate(test_medoids):
+                    test_medoid = X[test_medoid_idx]
+                    for j in range(n_samples):
+                        test_distances[j, i] = np.sqrt(np.sum((X[j] - test_medoid) ** 2))
+                
+                test_labels = np.argmin(test_distances, axis=1)
+                
+                # Calculate cost with new configuration
+                test_cost = 0
+                for test_cluster_id in range(n_clusters):
+                    test_cluster_points = np.where(test_labels == test_cluster_id)[0]
+                    if len(test_cluster_points) > 0:
+                        test_medoid = X[test_medoids[test_cluster_id]]
+                        for point_idx in test_cluster_points:
+                            test_cost += np.sqrt(np.sum((X[point_idx] - test_medoid) ** 2))
+                
+                # If this configuration is better, update
+                if test_cost < best_cost:
+                    best_cost = test_cost
+                    best_medoids = test_medoids.copy()
+                    improved = True
+        
+        # Update medoids if improvement found
+        if improved:
+            medoid_indices = best_medoids
+        else:
+            # No improvement, algorithm has converged
+            break
+    
+    # Final assignment with converged medoids
+    final_distances = np.zeros((n_samples, n_clusters))
+    for i, medoid_idx in enumerate(medoid_indices):
+        medoid = X[medoid_idx]
+        for j in range(n_samples):
+            final_distances[j, i] = np.sqrt(np.sum((X[j] - medoid) ** 2))
+    
+    final_labels = np.argmin(final_distances, axis=1)
+    
+    return medoid_indices, final_labels
 
 def get_processed_accident_data():
     """Generates dummy accident data and assigns a risk level to each point."""
@@ -692,8 +797,7 @@ def simulation_data():
                                 safety_factor += 0.5  # High risk adds 50% to the path weight
                             elif point['risk_level'] == 'Medium':
                                 safety_factor += 0.2  # Medium risk adds 20% to the path weight
-                        
-                        # Final weighted distance considering safety
+                          # Final weighted distance considering safety
                         weighted_distance = distance * safety_factor
                         
                         # Add the edge with original and weighted distances
@@ -836,13 +940,31 @@ def simulation_data():
         
         # Calculate the actual path segments with their properties
         path_segments = []
-        
         for i in range(len(path) - 1):
             start_node = path[i]
             end_node = path[i + 1]
             
             # Get edge data
             edge_data = G.get_edge_data(start_node, end_node)
+            
+            segment = {
+                "from": start_node,
+                "to": end_node,
+                "distance": edge_data['distance'],
+                "weighted_distance": edge_data['weighted_distance'],
+                "safety_factor": edge_data['safety_factor'],
+                "points_near_route": edge_data['points_near_route'],
+                "from_coords": {
+                    "lat": G.nodes[start_node]['lat'],
+                    "lng": G.nodes[start_node]['lng']
+                },
+                "to_coords": {
+                    "lat": G.nodes[end_node]['lat'],
+                    "lng": G.nodes[end_node]['lng']
+                }
+            }
+            
+            path_segments.append(segment)
             
             segment = {
                 "from": start_node,
